@@ -4,6 +4,7 @@ import "encoding/json"
 
 // Event: Server-sent event.
 type Event struct {
+	Id   string   `json:"id"`
 	Name string   `json:"name"`
 	Data []string `json:"data"`
 }
@@ -18,21 +19,14 @@ func (e *Event) String() string {
 	return string(bytes)
 }
 
-// NewDefaultEvent: Creates a new server-sent event with "message" as the event name.
-func NewDefaultEvent(data []string) *Event {
-	return &Event{
-		Name: "message",
-		Data: data,
-	}
-}
-
 // NewEvent: Creates a new server-sent event. If name is empty then NewDefaultEvent is called.
-func NewEvent(name string, data []string) *Event {
+func NewEvent(id string, name string, data []string) *Event {
 	if name == "" {
-		return NewDefaultEvent(data)
+		name = "message"
 	}
 
 	return &Event{
+		Id:   id,
 		Name: name,
 		Data: data,
 	}

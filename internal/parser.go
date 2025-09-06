@@ -4,56 +4,74 @@ import (
 	"bytes"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 // Parser: Server-sent event parser.
 type Parser struct {
-	Stream io.ReadCloser
+	stream io.ReadCloser
 }
 
-// EventCallback: The callback func type for Parse.
-type EventCallback func(*Event)
-
 // Parse: Reads till the end of the stream and dispatches events to the callback.
-// callback(event) receives an *Event.
-func (p *Parser) Parse(callback EventCallback) {
+// dispatchCb(event) receives an *Event.
+func (p *Parser) Parse(dispatchCb func(*Event), retryCb func(int), lastEventIdCb func(string)) {
 	crlfRegex := regexp.MustCompile(`\r\n|\r|\n`)
 
 	var buf bytes.Buffer
 	chunk := make([]byte, 1024)
 	for {
-		bytes, err := p.Stream.Read(chunk)
+		bytes, err := p.stream.Read(chunk)
 		if err != nil && bytes == 0 {
 			break
 		}
 
 		buf.Write(chunk[:bytes])
 
-		var event string
-		var data []string
-
 		str := buf.String()
 		str = crlfRegex.ReplaceAllString(str, "\n")
 		lines := strings.Split(str, "\n")
 		if len(lines) > 0 {
-			var filteredLines []string
+			var id string
+			var event string
+			var data []string
+			var offset int
 
-			for _, line := range lines {
+			for i, line := range lines {
+				ci := strings.Index(line, ":")
+
 				if line == "" && len(data) > 0 {
-					callback(NewEvent(event, data))
+					dispatchCb(NewEvent(id, event, data))
+					event = ""
 					data = nil
-				} else if strings.HasPrefix(line, "event:") {
-					event = strings.TrimSpace(line[len("event:"):])
-				} else if strings.HasPrefix(line, "data:") {
-					data = append(data, strings.TrimSpace(line[len("data:"):]))
-				} else {
-					filteredLines = append(filteredLines, line)
+					offset = i
+				} else if ci > 0 {
+					split := strings.SplitN(line, ":", 2)
+					field := split[0]
+					value := split[1]
+
+					switch field {
+					case "data":
+						data = append(data, value)
+						break
+					case "event":
+						event = value
+						break
+					case "id":
+						id = value
+						lastEventIdCb(id)
+						break
+					case "retry":
+						if ms, err := strconv.Atoi(value); err == nil {
+							retryCb(ms)
+						}
+						break
+					}
 				}
 			}
 
 			buf.Reset()
-			buf.WriteString(strings.Join(filteredLines, "\n"))
+			buf.WriteString(strings.Join(lines[offset:], "\r\n"))
 		}
 	}
 }
@@ -61,6 +79,6 @@ func (p *Parser) Parse(callback EventCallback) {
 // NewParser: Creates new server-sent event parser.
 func NewParser(stream io.ReadCloser) *Parser {
 	return &Parser{
-		Stream: stream,
+		stream: stream,
 	}
 }
